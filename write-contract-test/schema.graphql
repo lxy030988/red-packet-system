@@ -1,0 +1,22 @@
+type DataWritten @entity(immutable: true) {
+  id: Bytes!
+  sender: Bytes! # address
+  content: String! # string
+  value: BigInt! # uint256
+  timestamp: BigInt! # uint256
+  dataId: BigInt! # uint256
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
+
+type DirectTransfer @entity(immutable: true) {
+  id: Bytes!
+  from: Bytes! # address
+  to: Bytes! # address
+  amount: BigInt! # uint256
+  timestamp: BigInt! # uint256
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+  transactionHash: Bytes!
+}
