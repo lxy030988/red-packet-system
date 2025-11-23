@@ -168,8 +168,14 @@ console.log(result.data)
 
 # 合约 - 周日作业 红包系统
 
-## RedPacket 红包合约地址
+## RedPacket 红包合约地址 已开源代码
 
 ```
 0x6Ee4af33A25320f03393b421CF3Ef101478423a6
 ```
+
+- 合约地址 + abi 调用合约
+- 核心 hooks
+  - `useReadContract`: 读取数据（自动刷新）
+  - `useWriteContract`: 写入数据（发交易）
+  - `useWatchContractEvent`: 监听事件（实时通知）

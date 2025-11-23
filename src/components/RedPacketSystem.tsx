@@ -1,60 +1,60 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react'
 import {
   useAccount,
   useWriteContract,
   useReadContract,
   useWaitForTransactionReceipt,
-  useWatchContractEvent,
-} from 'wagmi';
-import { parseEther, formatEther } from 'viem';
-import { RED_PACKET_ADDRESS, RED_PACKET_ABI } from '../contracts/RedPacket';
+  useWatchContractEvent
+} from 'wagmi'
+import { parseEther, formatEther } from 'viem'
+import { RED_PACKET_ADDRESS, RED_PACKET_ABI } from '../contracts/RedPacket'
 
 interface PacketInfo {
-  id: bigint;
-  creator: string;
-  totalAmount: bigint;
-  remainingAmount: bigint;
-  totalCount: bigint;
-  remainingCount: bigint;
-  createdAt: bigint;
-  isRandom: boolean;
+  id: bigint
+  creator: string
+  totalAmount: bigint
+  remainingAmount: bigint
+  totalCount: bigint
+  remainingCount: bigint
+  createdAt: bigint
+  isRandom: boolean
 }
 
 export function RedPacketSystem() {
-  const { address, isConnected } = useAccount();
-  const [amount, setAmount] = useState('');
-  const [count, setCount] = useState('');
-  const [isRandom, setIsRandom] = useState(true);
-  const [packetId, setPacketId] = useState('');
-  const [notifications, setNotifications] = useState<string[]>([]);
+  const { address, isConnected } = useAccount()
+  const [amount, setAmount] = useState('')
+  const [count, setCount] = useState('')
+  const [isRandom, setIsRandom] = useState(true)
+  const [packetId, setPacketId] = useState('')
+  const [notifications, setNotifications] = useState<string[]>([])
 
-  const { data: hash, writeContract, isPending } = useWriteContract();
+  const { data: hash, writeContract, isPending } = useWriteContract()
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
-    hash,
-  });
+    hash
+  })
 
   // 读取红包总数
   const { data: totalPackets } = useReadContract({
     address: RED_PACKET_ADDRESS as `0x${string}`,
     abi: RED_PACKET_ABI,
-    functionName: 'getTotalPackets',
-  });
+    functionName: 'getTotalPackets'
+  })
 
   // 读取用户创建的红包
   const { data: myPackets } = useReadContract({
     address: RED_PACKET_ADDRESS as `0x${string}`,
     abi: RED_PACKET_ABI,
     functionName: 'getCreatorPackets',
-    args: address ? [address] : undefined,
-  });
+    args: address ? [address] : undefined
+  })
 
   // 读取用户领取的红包
   const { data: claimedPackets } = useReadContract({
     address: RED_PACKET_ADDRESS as `0x${string}`,
     abi: RED_PACKET_ABI,
     functionName: 'getUserClaimedPackets',
-    args: address ? [address] : undefined,
-  });
+    args: address ? [address] : undefined
+  })
 
   // 监听红包创建事件
   useWatchContractEvent({
@@ -63,12 +63,10 @@ export function RedPacketSystem() {
     eventName: 'PacketCreated',
     onLogs(logs) {
       logs.forEach((log: any) => {
-        addNotification(
-          `🎉 新红包创建！ID: ${log.args.packetId}, 金额: ${formatEther(log.args.totalAmount)} ETH`
-        );
-      });
-    },
-  });
+        addNotification(`🎉 新红包创建！ID: ${log.args.packetId}, 金额: ${formatEther(log.args.totalAmount)} ETH`)
+      })
+    }
+  })
 
   // 监听红包领取事件
   useWatchContractEvent({
@@ -77,12 +75,10 @@ export function RedPacketSystem() {
     eventName: 'PacketClaimed',
     onLogs(logs) {
       logs.forEach((log: any) => {
-        addNotification(
-          `💰 红包被领取！ID: ${log.args.packetId}, 金额: ${formatEther(log.args.amount)} ETH`
-        );
-      });
-    },
-  });
+        addNotification(`💰 红包被领取！ID: ${log.args.packetId}, 金额: ${formatEther(log.args.amount)} ETH`)
+      })
+    }
+  })
 
   // 监听红包抢完事件
   useWatchContractEvent({
@@ -91,10 +87,10 @@ export function RedPacketSystem() {
     eventName: 'PacketFinished',
     onLogs(logs) {
       logs.forEach((log: any) => {
-        addNotification(`🎊 红包已抢完！ID: ${log.args.packetId}`);
-      });
-    },
-  });
+        addNotification(`🎊 红包已抢完！ID: ${log.args.packetId}`)
+      })
+    }
+  })
 
   // 监听已领取事件
   useWatchContractEvent({
@@ -103,19 +99,19 @@ export function RedPacketSystem() {
     eventName: 'AlreadyClaimed',
     onLogs(logs) {
       logs.forEach((log: any) => {
-        addNotification(`⚠️ 你已经领取过这个红包了！ID: ${log.args.packetId}`);
-      });
-    },
-  });
+        addNotification(`⚠️ 你已经领取过这个红包了！ID: ${log.args.packetId}`)
+      })
+    }
+  })
 
   const addNotification = (message: string) => {
-    setNotifications((prev) => [message, ...prev].slice(0, 10));
-  };
+    setNotifications(prev => [message, ...prev].slice(0, 10))
+  }
 
   const handleCreatePacket = async () => {
     if (!amount || !count) {
-      alert('请输入金额和数量');
-      return;
+      alert('请输入金额和数量')
+      return
     }
 
     try {
@@ -124,18 +120,18 @@ export function RedPacketSystem() {
         abi: RED_PACKET_ABI,
         functionName: 'createPacket',
         args: [BigInt(count), isRandom],
-        value: parseEther(amount),
-      });
+        value: parseEther(amount)
+      })
     } catch (error) {
-      console.error('创建失败:', error);
-      alert('创建失败: ' + (error as Error).message);
+      console.error('创建失败:', error)
+      alert('创建失败: ' + (error as Error).message)
     }
-  };
+  }
 
   const handleClaimPacket = async () => {
     if (!packetId) {
-      alert('请输入红包ID');
-      return;
+      alert('请输入红包ID')
+      return
     }
 
     try {
@@ -143,21 +139,21 @@ export function RedPacketSystem() {
         address: RED_PACKET_ADDRESS as `0x${string}`,
         abi: RED_PACKET_ABI,
         functionName: 'claimPacket',
-        args: [BigInt(packetId)],
-      });
+        args: [BigInt(packetId)]
+      })
     } catch (error) {
-      console.error('领取失败:', error);
-      alert('领取失败: ' + (error as Error).message);
+      console.error('领取失败:', error)
+      alert('领取失败: ' + (error as Error).message)
     }
-  };
+  }
 
   useEffect(() => {
     if (isSuccess) {
-      setAmount('');
-      setCount('');
-      setPacketId('');
+      setAmount('')
+      setCount('')
+      setPacketId('')
     }
-  }, [isSuccess]);
+  }, [isSuccess])
 
   if (!isConnected) {
     return (
@@ -165,7 +161,7 @@ export function RedPacketSystem() {
         <h2>红包系统</h2>
         <p style={{ color: '#666' }}>请先连接钱包</p>
       </div>
-    );
+    )
   }
 
   return (
@@ -209,7 +205,7 @@ export function RedPacketSystem() {
               <input
                 type="text"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={e => setAmount(e.target.value)}
                 placeholder="0.01"
                 style={styles.input}
               />
@@ -220,7 +216,7 @@ export function RedPacketSystem() {
               <input
                 type="number"
                 value={count}
-                onChange={(e) => setCount(e.target.value)}
+                onChange={e => setCount(e.target.value)}
                 placeholder="3"
                 min="1"
                 style={styles.input}
@@ -229,11 +225,7 @@ export function RedPacketSystem() {
 
             <div style={styles.formGroup}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <input
-                  type="checkbox"
-                  checked={isRandom}
-                  onChange={(e) => setIsRandom(e.target.checked)}
-                />
+                <input type="checkbox" checked={isRandom} onChange={e => setIsRandom(e.target.checked)} />
                 随机红包
               </label>
               <p style={{ fontSize: '0.75rem', color: '#666', margin: '0.5rem 0 0 1.5rem' }}>
@@ -247,7 +239,7 @@ export function RedPacketSystem() {
               style={{
                 ...styles.button,
                 backgroundColor: '#dc3545',
-                opacity: isPending || isConfirming || RED_PACKET_ADDRESS === '0x...' ? 0.5 : 1,
+                opacity: isPending || isConfirming || RED_PACKET_ADDRESS === '0x...' ? 0.5 : 1
               }}
             >
               {RED_PACKET_ADDRESS === '0x...'
@@ -269,7 +261,7 @@ export function RedPacketSystem() {
               <input
                 type="number"
                 value={packetId}
-                onChange={(e) => setPacketId(e.target.value)}
+                onChange={e => setPacketId(e.target.value)}
                 placeholder="0"
                 min="0"
                 style={styles.input}
@@ -282,7 +274,7 @@ export function RedPacketSystem() {
               style={{
                 ...styles.button,
                 backgroundColor: '#28a745',
-                opacity: isPending || isConfirming || RED_PACKET_ADDRESS === '0x...' ? 0.5 : 1,
+                opacity: isPending || isConfirming || RED_PACKET_ADDRESS === '0x...' ? 0.5 : 1
               }}
             >
               {RED_PACKET_ADDRESS === '0x...'
@@ -295,7 +287,9 @@ export function RedPacketSystem() {
             </button>
 
             <div style={{ marginTop: '1rem', fontSize: '0.75rem', color: '#666' }}>
-              <p style={{ margin: '0.25rem 0' }}>最新红包ID: {totalPackets ? (Number(totalPackets) - 1).toString() : '0'}</p>
+              <p style={{ margin: '0.25rem 0' }}>
+                最新红包ID: {totalPackets ? (Number(totalPackets) - 1).toString() : '0'}
+              </p>
               <p style={{ margin: '0.25rem 0' }}>提示: 红包ID从0开始</p>
             </div>
           </div>
@@ -306,14 +300,8 @@ export function RedPacketSystem() {
             <p style={{ margin: '0 0 0.5rem 0' }}>
               <strong>交易哈希:</strong>
             </p>
-            <p style={{ margin: 0, fontSize: '0.75rem', wordBreak: 'break-all' }}>
-              {hash}
-            </p>
-            {isSuccess && (
-              <p style={{ margin: '0.5rem 0 0 0', color: '#28a745' }}>
-                ✓ 操作成功！
-              </p>
-            )}
+            <p style={{ margin: 0, fontSize: '0.75rem', wordBreak: 'break-all' }}>{hash}</p>
+            {isSuccess && <p style={{ margin: '0.5rem 0 0 0', color: '#28a745' }}>✓ 操作成功！</p>}
           </div>
         )}
       </div>
@@ -344,7 +332,7 @@ export function RedPacketSystem() {
         </div>
       )}
     </div>
-  );
+  )
 }
 
 // 红包卡片组件
@@ -353,57 +341,59 @@ function PacketCard({ packetId }: { packetId: bigint }) {
     address: RED_PACKET_ADDRESS as `0x${string}`,
     abi: RED_PACKET_ABI,
     functionName: 'getPacketInfo',
-    args: [packetId],
-  });
+    args: [packetId]
+  })
 
-  if (!packetInfo) return null;
+  if (!packetInfo) return null
 
-  const [creator, totalAmount, remainingAmount, totalCount, remainingCount, createdAt, isRandom] = packetInfo;
-  const progress = Number(remainingCount) / Number(totalCount);
+  const [creator, totalAmount, remainingAmount, totalCount, remainingCount, createdAt, isRandom] = packetInfo
+  const progress = Number(remainingCount) / Number(totalCount)
 
   return (
     <div style={styles.packetCard}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
         <span style={{ fontWeight: 'bold' }}>红包 #{packetId.toString()}</span>
-        <span style={{
-          fontSize: '0.75rem',
-          padding: '0.25rem 0.5rem',
-          backgroundColor: isRandom ? '#ffc107' : '#17a2b8',
-          color: '#fff',
-          borderRadius: '4px',
-        }}>
+        <span
+          style={{
+            fontSize: '0.75rem',
+            padding: '0.25rem 0.5rem',
+            backgroundColor: isRandom ? '#ffc107' : '#17a2b8',
+            color: '#fff',
+            borderRadius: '4px'
+          }}
+        >
           {isRandom ? '随机' : '平均'}
         </span>
       </div>
 
       <div style={{ fontSize: '0.875rem', color: '#666', marginBottom: '0.5rem' }}>
-        <p style={{ margin: '0.25rem 0' }}>
-          总金额: {formatEther(totalAmount)} ETH
-        </p>
-        <p style={{ margin: '0.25rem 0' }}>
-          剩余: {formatEther(remainingAmount)} ETH
-        </p>
+        <p style={{ margin: '0.25rem 0' }}>总金额: {formatEther(totalAmount)} ETH</p>
+        <p style={{ margin: '0.25rem 0' }}>剩余: {formatEther(remainingAmount)} ETH</p>
         <p style={{ margin: '0.25rem 0' }}>
           个数: {remainingCount.toString()}/{totalCount.toString()}
         </p>
       </div>
 
-      <div style={{
-        width: '100%',
-        height: '8px',
-        backgroundColor: '#e9ecef',
-        borderRadius: '4px',
-        overflow: 'hidden',
-      }}>
-        <div style={{
-          width: `${progress * 100}%`,
-          height: '100%',
-          backgroundColor: progress > 0.5 ? '#28a745' : progress > 0.2 ? '#ffc107' : '#dc3545',
-          transition: 'width 0.3s ease',
-        }} />
+      <div
+        style={{
+          width: '100%',
+          height: '8px',
+          backgroundColor: '#e9ecef',
+          borderRadius: '4px',
+          overflow: 'hidden'
+        }}
+      >
+        <div
+          style={{
+            width: `${progress * 100}%`,
+            height: '100%',
+            backgroundColor: progress > 0.5 ? '#28a745' : progress > 0.2 ? '#ffc107' : '#dc3545',
+            transition: 'width 0.3s ease'
+          }}
+        />
       </div>
     </div>
-  );
+  )
 }
 
 const styles = {
@@ -412,50 +402,50 @@ const styles = {
     backgroundColor: '#fff',
     borderRadius: '8px',
     boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-    marginBottom: '1.5rem',
+    marginBottom: '1.5rem'
   } as React.CSSProperties,
   statsBox: {
     display: 'grid',
     gridTemplateColumns: 'repeat(4, 1fr)',
     gap: '1rem',
-    marginBottom: '1.5rem',
+    marginBottom: '1.5rem'
   } as React.CSSProperties,
   statItem: {
     padding: '1rem',
     backgroundColor: '#f8f9fa',
     borderRadius: '4px',
-    textAlign: 'center',
+    textAlign: 'center'
   } as React.CSSProperties,
   statLabel: {
     fontSize: '0.75rem',
     color: '#666',
-    marginBottom: '0.5rem',
+    marginBottom: '0.5rem'
   } as React.CSSProperties,
   statValue: {
     fontSize: '1.25rem',
     fontWeight: 'bold',
-    color: '#333',
+    color: '#333'
   } as React.CSSProperties,
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(2, 1fr)',
     gap: '1.5rem',
-    marginBottom: '1.5rem',
+    marginBottom: '1.5rem'
   } as React.CSSProperties,
   card: {
     padding: '1.5rem',
     backgroundColor: '#f8f9fa',
     borderRadius: '8px',
-    border: '1px solid #dee2e6',
+    border: '1px solid #dee2e6'
   } as React.CSSProperties,
   formGroup: {
-    marginBottom: '1rem',
+    marginBottom: '1rem'
   } as React.CSSProperties,
   label: {
     display: 'block',
     marginBottom: '0.5rem',
     fontWeight: 'bold',
-    fontSize: '0.875rem',
+    fontSize: '0.875rem'
   } as React.CSSProperties,
   input: {
     width: '100%',
@@ -463,7 +453,7 @@ const styles = {
     border: '1px solid #ddd',
     borderRadius: '4px',
     fontSize: '1rem',
-    boxSizing: 'border-box',
+    boxSizing: 'border-box'
   } as React.CSSProperties,
   button: {
     padding: '0.75rem 1.5rem',
@@ -473,17 +463,17 @@ const styles = {
     fontSize: '1rem',
     fontWeight: 'bold',
     cursor: 'pointer',
-    width: '100%',
+    width: '100%'
   } as React.CSSProperties,
   statusBox: {
     padding: '1rem',
     backgroundColor: '#f8f9fa',
     borderRadius: '4px',
-    border: '1px solid #dee2e6',
+    border: '1px solid #dee2e6'
   } as React.CSSProperties,
   notificationsBox: {
     maxHeight: '300px',
-    overflowY: 'auto',
+    overflowY: 'auto'
   } as React.CSSProperties,
   notification: {
     padding: '0.75rem',
@@ -491,17 +481,17 @@ const styles = {
     borderRadius: '4px',
     marginBottom: '0.5rem',
     fontSize: '0.875rem',
-    border: '1px solid #dee2e6',
+    border: '1px solid #dee2e6'
   } as React.CSSProperties,
   packetList: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
-    gap: '1rem',
+    gap: '1rem'
   } as React.CSSProperties,
   packetCard: {
     padding: '1rem',
     backgroundColor: '#f8f9fa',
     borderRadius: '8px',
-    border: '1px solid #dee2e6',
-  } as React.CSSProperties,
-};
+    border: '1px solid #dee2e6'
+  } as React.CSSProperties
+}
