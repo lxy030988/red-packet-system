@@ -26,7 +26,6 @@ export function RedPacketSystem() {
   const [packetId, setPacketId] = useState('')
   const [notifications, setNotifications] = useState<string[]>([])
   const [claimRecords, setClaimRecords] = useState<Map<string, ClaimRecord[]>>(new Map())
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [loadedPackets, setLoadedPackets] = useState<Set<string>>(new Set())
 
   const { data: hash, writeContract, isPending } = useWriteContract()
@@ -140,7 +139,6 @@ export function RedPacketSystem() {
 
     try {
       console.log(`🔍 开始加载红包 #${packetIdToLoad} 的历史记录...`)
-      setIsLoadingHistory(true)
       if (showNotification) addNotification(`🔍 正在加载红包 #${packetIdToLoad} 的领取记录...`)
 
       // 获取 PacketClaimed 事件的历史日志
@@ -193,37 +191,27 @@ export function RedPacketSystem() {
     } catch (error: any) {
       console.error('❌ 加载历史记录失败:', error)
       if (showNotification) addNotification(`❌ 加载失败: ${error.message || '网络错误'}`)
-    } finally {
-      setIsLoadingHistory(false)
     }
   }
 
-  // 加载所有红包的历史记录
-  const loadAllHistory = async () => {
-    if (myPackets && myPackets.length > 0 && publicClient) {
-      console.log(`📦 开始加载 ${myPackets.length} 个红包的历史记录...`)
-      for (const id of myPackets) {
-        await loadClaimHistory(id)
-        // 添加小延迟避免请求过快
-        await new Promise(resolve => setTimeout(resolve, 300))
-      }
-    }
-  }
-
-  // 自动加载历史记录（仅在 myPackets 首次加载时触发）
+  // 自动加载历史记录（仅在页面首次加载或有新红包时触发一次）
   useEffect(() => {
     if (myPackets && myPackets.length > 0 && publicClient) {
-      // 检查是否有未加载的红包（使用 loadedPackets 标记）
-      const unloadedPackets = myPackets.filter(id => !loadedPackets.has(id.toString()))
+      // 检查是否有未加载的红包
+      const unloadedPackets = myPackets.filter(id => {
+        const idStr = id.toString()
+        // 只检查 loadedPackets 标记
+        return !loadedPackets.has(idStr)
+      })
 
       if (unloadedPackets.length > 0) {
-        console.log(`🚀 自动加载 ${unloadedPackets.length} 个红包的历史记录`)
+        console.log(`🚀 检测到 ${unloadedPackets.length} 个未加载的红包，开始加载历史记录`)
 
         // 异步加载，不阻塞渲染，不显示通知
         const loadAll = async () => {
           for (const id of unloadedPackets) {
             await loadClaimHistory(id, false) // 自动加载不显示通知
-            await new Promise(resolve => setTimeout(resolve, 300))
+            await new Promise(resolve => setTimeout(resolve, 200))
           }
         }
 
@@ -305,9 +293,6 @@ export function RedPacketSystem() {
           refetchClaimedPackets(),
           refetchHasClaimed()
         ])
-
-        // 清空已加载标记，强制重新加载领取记录
-        setLoadedPackets(new Set())
 
         console.log('✅ 数据刷新完成')
       }, 2000)
@@ -490,33 +475,13 @@ export function RedPacketSystem() {
       {/* 我的红包列表 */}
       {myPackets && myPackets.length > 0 && (
         <div style={styles.container}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h3 style={{ margin: 0 }}>我创建的红包</h3>
-            <button
-              onClick={loadAllHistory}
-              disabled={isLoadingHistory}
-              style={{
-                padding: '0.5rem 1rem',
-                backgroundColor: isLoadingHistory ? '#6c757d' : '#007bff',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '4px',
-                fontSize: '0.875rem',
-                cursor: isLoadingHistory ? 'not-allowed' : 'pointer',
-                opacity: isLoadingHistory ? 0.6 : 1
-              }}
-            >
-              {isLoadingHistory ? '加载中...' : '🔄 加载所有领取记录'}
-            </button>
-          </div>
+          <h3 style={{ margin: '0 0 1rem 0' }}>我创建的红包</h3>
           <div style={styles.packetList}>
             {myPackets.map((id: bigint) => (
               <PacketCard
                 key={id.toString()}
                 packetId={id}
                 claimRecords={claimRecords.get(id.toString()) || []}
-                onRefresh={() => loadClaimHistory(id)}
-                isLoading={isLoadingHistory}
               />
             ))}
           </div>
@@ -529,14 +494,10 @@ export function RedPacketSystem() {
 // 红包卡片组件
 function PacketCard({
   packetId,
-  claimRecords,
-  onRefresh,
-  isLoading
+  claimRecords
 }: {
   packetId: bigint
   claimRecords: ClaimRecord[]
-  onRefresh: () => void
-  isLoading: boolean
 }) {
   const [showDetails, setShowDetails] = useState(false)
 
@@ -599,41 +560,22 @@ function PacketCard({
         />
       </div>
 
-      {/* 操作按钮组 */}
-      <div style={{ display: 'flex', gap: '0.5rem' }}>
-        <button
-          onClick={() => setShowDetails(!showDetails)}
-          style={{
-            flex: 1,
-            padding: '0.5rem',
-            backgroundColor: '#f8f9fa',
-            border: '1px solid #dee2e6',
-            borderRadius: '4px',
-            fontSize: '0.75rem',
-            cursor: 'pointer',
-            color: '#495057'
-          }}
-        >
-          {showDetails ? '▲ 收起详情' : `▼ 查看领取记录 (${claimRecords.length})`}
-        </button>
-        <button
-          onClick={onRefresh}
-          disabled={isLoading}
-          style={{
-            padding: '0.5rem 0.75rem',
-            backgroundColor: isLoading ? '#e9ecef' : '#007bff',
-            color: isLoading ? '#6c757d' : '#fff',
-            border: '1px solid #dee2e6',
-            borderRadius: '4px',
-            fontSize: '0.75rem',
-            cursor: isLoading ? 'not-allowed' : 'pointer',
-            opacity: isLoading ? 0.6 : 1
-          }}
-          title="刷新领取记录"
-        >
-          🔄
-        </button>
-      </div>
+      {/* 查看详情按钮 */}
+      <button
+        onClick={() => setShowDetails(!showDetails)}
+        style={{
+          width: '100%',
+          padding: '0.5rem',
+          backgroundColor: '#f8f9fa',
+          border: '1px solid #dee2e6',
+          borderRadius: '4px',
+          fontSize: '0.75rem',
+          cursor: 'pointer',
+          color: '#495057'
+        }}
+      >
+        {showDetails ? '▲ 收起详情' : `▼ 查看领取记录 (${claimRecords.length})`}
+      </button>
 
       {/* 领取记录详情 */}
       {showDetails && (
