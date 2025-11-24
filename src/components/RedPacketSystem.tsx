@@ -4,29 +4,30 @@ import {
   useWriteContract,
   useReadContract,
   useWaitForTransactionReceipt,
-  useWatchContractEvent
+  useWatchContractEvent,
+  usePublicClient
 } from 'wagmi'
 import { parseEther, formatEther } from 'viem'
 import { RED_PACKET_ADDRESS, RED_PACKET_ABI } from '../contracts/RedPacket'
 
-interface PacketInfo {
-  id: bigint
-  creator: string
-  totalAmount: bigint
-  remainingAmount: bigint
-  totalCount: bigint
-  remainingCount: bigint
-  createdAt: bigint
-  isRandom: boolean
+// 领取记录接口
+interface ClaimRecord {
+  claimer: string
+  amount: bigint
+  timestamp: bigint
 }
 
 export function RedPacketSystem() {
   const { address, isConnected } = useAccount()
+  const publicClient = usePublicClient()
   const [amount, setAmount] = useState('')
   const [count, setCount] = useState('')
   const [isRandom, setIsRandom] = useState(true)
   const [packetId, setPacketId] = useState('')
   const [notifications, setNotifications] = useState<string[]>([])
+  const [claimRecords, setClaimRecords] = useState<Map<string, ClaimRecord[]>>(new Map())
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [loadedPackets, setLoadedPackets] = useState<Set<string>>(new Set())
 
   const { data: hash, writeContract, isPending } = useWriteContract()
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({
@@ -34,14 +35,14 @@ export function RedPacketSystem() {
   })
 
   // 读取红包总数
-  const { data: totalPackets } = useReadContract({
+  const { data: totalPackets, refetch: refetchTotal } = useReadContract({
     address: RED_PACKET_ADDRESS as `0x${string}`,
     abi: RED_PACKET_ABI,
     functionName: 'getTotalPackets'
   })
 
   // 读取用户创建的红包
-  const { data: myPackets } = useReadContract({
+  const { data: myPackets, refetch: refetchMyPackets } = useReadContract({
     address: RED_PACKET_ADDRESS as `0x${string}`,
     abi: RED_PACKET_ABI,
     functionName: 'getCreatorPackets',
@@ -49,11 +50,19 @@ export function RedPacketSystem() {
   })
 
   // 读取用户领取的红包
-  const { data: claimedPackets } = useReadContract({
+  const { data: claimedPackets, refetch: refetchClaimedPackets } = useReadContract({
     address: RED_PACKET_ADDRESS as `0x${string}`,
     abi: RED_PACKET_ABI,
     functionName: 'getUserClaimedPackets',
     args: address ? [address] : undefined
+  })
+
+  // 检查当前用户是否已领取指定红包
+  const { data: hasClaimedCurrent, refetch: refetchHasClaimed } = useReadContract({
+    address: RED_PACKET_ADDRESS as `0x${string}`,
+    abi: RED_PACKET_ABI,
+    functionName: 'hasClaimed',
+    args: packetId && address ? [BigInt(packetId), address] : undefined
   })
 
   // 监听红包创建事件
@@ -75,7 +84,24 @@ export function RedPacketSystem() {
     eventName: 'PacketClaimed',
     onLogs(logs) {
       logs.forEach((log: any) => {
-        addNotification(`💰 红包被领取！ID: ${log.args.packetId}, 金额: ${formatEther(log.args.amount)} ETH`)
+        const packetIdStr = log.args.packetId.toString()
+        addNotification(
+          `💰 红包被领取！ID: ${log.args.packetId}, 领取人: ${log.args.claimer.slice(0, 6)}...${log.args.claimer.slice(-4)}, 金额: ${formatEther(log.args.amount)} ETH`
+        )
+
+        // 添加到领取记录
+        const record: ClaimRecord = {
+          claimer: log.args.claimer,
+          amount: log.args.amount,
+          timestamp: log.args.timestamp || BigInt(Math.floor(Date.now() / 1000))
+        }
+
+        setClaimRecords(prev => {
+          const newMap = new Map(prev)
+          const existing = newMap.get(packetIdStr) || []
+          newMap.set(packetIdStr, [...existing, record])
+          return newMap
+        })
       })
     }
   })
@@ -103,6 +129,109 @@ export function RedPacketSystem() {
       })
     }
   })
+
+  // 手动加载特定红包的历史领取记录
+  const loadClaimHistory = async (packetIdToLoad: bigint, showNotification = true) => {
+    if (!publicClient) {
+      console.log('❌ publicClient 未就绪')
+      if (showNotification) addNotification('⚠️ 网络未就绪，请稍后重试')
+      return
+    }
+
+    try {
+      console.log(`🔍 开始加载红包 #${packetIdToLoad} 的历史记录...`)
+      setIsLoadingHistory(true)
+      if (showNotification) addNotification(`🔍 正在加载红包 #${packetIdToLoad} 的领取记录...`)
+
+      // 获取 PacketClaimed 事件的历史日志
+      const logs = await publicClient.getLogs({
+        address: RED_PACKET_ADDRESS as `0x${string}`,
+        event: {
+          type: 'event',
+          name: 'PacketClaimed',
+          inputs: [
+            { type: 'uint256', name: 'packetId', indexed: true },
+            { type: 'address', name: 'claimer', indexed: true },
+            { type: 'uint256', name: 'amount', indexed: false },
+            { type: 'uint256', name: 'timestamp', indexed: false }
+          ]
+        },
+        args: {
+          packetId: packetIdToLoad
+        },
+        fromBlock: 'earliest' as unknown as bigint,
+        toBlock: 'latest' as unknown as bigint
+      })
+
+      console.log(`✅ 找到 ${logs.length} 条领取记录`)
+
+      // 处理日志并更新 claimRecords
+      const records: ClaimRecord[] = logs.map((log: any) => ({
+        claimer: log.args.claimer,
+        amount: log.args.amount,
+        timestamp: log.args.timestamp || BigInt(0)
+      }))
+
+      setClaimRecords(prev => {
+        const newMap = new Map(prev)
+        newMap.set(packetIdToLoad.toString(), records)
+        return newMap
+      })
+
+      // 标记为已加载
+      setLoadedPackets(prev => new Set(prev).add(packetIdToLoad.toString()))
+
+      if (showNotification) {
+        if (records.length > 0) {
+          console.log(`💾 保存 ${records.length} 条记录到状态`)
+          addNotification(`✅ 红包 #${packetIdToLoad} 加载完成: ${records.length} 条记录`)
+        } else {
+          console.log('⚠️ 没有找到领取记录')
+          addNotification(`✅ 红包 #${packetIdToLoad} 加载完成: 暂无领取记录`)
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ 加载历史记录失败:', error)
+      if (showNotification) addNotification(`❌ 加载失败: ${error.message || '网络错误'}`)
+    } finally {
+      setIsLoadingHistory(false)
+    }
+  }
+
+  // 加载所有红包的历史记录
+  const loadAllHistory = async () => {
+    if (myPackets && myPackets.length > 0 && publicClient) {
+      console.log(`📦 开始加载 ${myPackets.length} 个红包的历史记录...`)
+      for (const id of myPackets) {
+        await loadClaimHistory(id)
+        // 添加小延迟避免请求过快
+        await new Promise(resolve => setTimeout(resolve, 300))
+      }
+    }
+  }
+
+  // 自动加载历史记录（仅在 myPackets 首次加载时触发）
+  useEffect(() => {
+    if (myPackets && myPackets.length > 0 && publicClient) {
+      // 检查是否有未加载的红包（使用 loadedPackets 标记）
+      const unloadedPackets = myPackets.filter(id => !loadedPackets.has(id.toString()))
+
+      if (unloadedPackets.length > 0) {
+        console.log(`🚀 自动加载 ${unloadedPackets.length} 个红包的历史记录`)
+
+        // 异步加载，不阻塞渲染，不显示通知
+        const loadAll = async () => {
+          for (const id of unloadedPackets) {
+            await loadClaimHistory(id, false) // 自动加载不显示通知
+            await new Promise(resolve => setTimeout(resolve, 300))
+          }
+        }
+
+        loadAll()
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myPackets, publicClient])
 
   const addNotification = (message: string) => {
     setNotifications(prev => [message, ...prev].slice(0, 10))
@@ -134,6 +263,16 @@ export function RedPacketSystem() {
       return
     }
 
+    // 前端检查是否已领取
+    if (hasClaimedCurrent) {
+      const confirmClaim = window.confirm(
+        '⚠️ 检测到你已经领取过这个红包了！\n\n如果继续尝试领取，交易会失败并消耗 Gas 费。\n\n是否仍要继续？'
+      )
+      if (!confirmClaim) {
+        return
+      }
+    }
+
     try {
       writeContract({
         address: RED_PACKET_ADDRESS as `0x${string}`,
@@ -147,13 +286,35 @@ export function RedPacketSystem() {
     }
   }
 
+  // 交易成功后自动刷新
   useEffect(() => {
-    if (isSuccess) {
+    if (isSuccess && hash) {
+      // 清空表单
       setAmount('')
       setCount('')
       setPacketId('')
+
+      // 延迟刷新，等待区块确认和事件触发
+      const timer = setTimeout(async () => {
+        console.log('🔄 交易成功，开始刷新所有数据...')
+
+        // 刷新所有合约读取数据
+        await Promise.all([
+          refetchTotal(),
+          refetchMyPackets(),
+          refetchClaimedPackets(),
+          refetchHasClaimed()
+        ])
+
+        // 清空已加载标记，强制重新加载领取记录
+        setLoadedPackets(new Set())
+
+        console.log('✅ 数据刷新完成')
+      }, 2000)
+
+      return () => clearTimeout(timer)
     }
-  }, [isSuccess])
+  }, [isSuccess, hash, refetchTotal, refetchMyPackets, refetchClaimedPackets, refetchHasClaimed])
 
   if (!isConnected) {
     return (
@@ -176,9 +337,7 @@ export function RedPacketSystem() {
           <div style={styles.statItem}>
             <div style={styles.statLabel}>合约地址</div>
             <div style={styles.statValue}>
-              {RED_PACKET_ADDRESS === '0x...'
-                ? '未部署'
-                : `${RED_PACKET_ADDRESS.slice(0, 8)}...${RED_PACKET_ADDRESS.slice(-6)}`}
+              {`${RED_PACKET_ADDRESS.slice(0, 8)}...${RED_PACKET_ADDRESS.slice(-6)}`}
             </div>
           </div>
           <div style={styles.statItem}>
@@ -235,20 +394,14 @@ export function RedPacketSystem() {
 
             <button
               onClick={handleCreatePacket}
-              disabled={isPending || isConfirming || RED_PACKET_ADDRESS === '0x...'}
+              disabled={isPending || isConfirming}
               style={{
                 ...styles.button,
                 backgroundColor: '#dc3545',
-                opacity: isPending || isConfirming || RED_PACKET_ADDRESS === '0x...' ? 0.5 : 1
+                opacity: isPending || isConfirming ? 0.5 : 1
               }}
             >
-              {RED_PACKET_ADDRESS === '0x...'
-                ? '请先部署合约'
-                : isPending
-                ? '等待确认...'
-                : isConfirming
-                ? '创建中...'
-                : '发红包'}
+              {isPending ? '等待确认...' : isConfirming ? '创建中...' : '发红包'}
             </button>
           </div>
 
@@ -268,22 +421,36 @@ export function RedPacketSystem() {
               />
             </div>
 
+            {/* 显示是否已领取 */}
+            {packetId && hasClaimedCurrent !== undefined && (
+              <div
+                style={{
+                  padding: '0.5rem',
+                  marginBottom: '1rem',
+                  backgroundColor: hasClaimedCurrent ? '#fff3cd' : '#d1ecf1',
+                  border: `1px solid ${hasClaimedCurrent ? '#ffc107' : '#bee5eb'}`,
+                  borderRadius: '4px',
+                  fontSize: '0.875rem'
+                }}
+              >
+                {hasClaimedCurrent ? (
+                  <span style={{ color: '#856404' }}>⚠️ 你已经领取过这个红包了</span>
+                ) : (
+                  <span style={{ color: '#0c5460' }}>✓ 可以领取</span>
+                )}
+              </div>
+            )}
+
             <button
               onClick={handleClaimPacket}
-              disabled={isPending || isConfirming || RED_PACKET_ADDRESS === '0x...'}
+              disabled={isPending || isConfirming}
               style={{
                 ...styles.button,
                 backgroundColor: '#28a745',
-                opacity: isPending || isConfirming || RED_PACKET_ADDRESS === '0x...' ? 0.5 : 1
+                opacity: isPending || isConfirming ? 0.5 : 1
               }}
             >
-              {RED_PACKET_ADDRESS === '0x...'
-                ? '请先部署合约'
-                : isPending
-                ? '等待确认...'
-                : isConfirming
-                ? '领取中...'
-                : '抢红包'}
+              {isPending ? '等待确认...' : isConfirming ? '领取中...' : '抢红包'}
             </button>
 
             <div style={{ marginTop: '1rem', fontSize: '0.75rem', color: '#666' }}>
@@ -323,10 +490,34 @@ export function RedPacketSystem() {
       {/* 我的红包列表 */}
       {myPackets && myPackets.length > 0 && (
         <div style={styles.container}>
-          <h3 style={{ margin: '0 0 1rem 0' }}>我创建的红包</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0 }}>我创建的红包</h3>
+            <button
+              onClick={loadAllHistory}
+              disabled={isLoadingHistory}
+              style={{
+                padding: '0.5rem 1rem',
+                backgroundColor: isLoadingHistory ? '#6c757d' : '#007bff',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '4px',
+                fontSize: '0.875rem',
+                cursor: isLoadingHistory ? 'not-allowed' : 'pointer',
+                opacity: isLoadingHistory ? 0.6 : 1
+              }}
+            >
+              {isLoadingHistory ? '加载中...' : '🔄 加载所有领取记录'}
+            </button>
+          </div>
           <div style={styles.packetList}>
             {myPackets.map((id: bigint) => (
-              <PacketCard key={id.toString()} packetId={id} />
+              <PacketCard
+                key={id.toString()}
+                packetId={id}
+                claimRecords={claimRecords.get(id.toString()) || []}
+                onRefresh={() => loadClaimHistory(id)}
+                isLoading={isLoadingHistory}
+              />
             ))}
           </div>
         </div>
@@ -336,7 +527,19 @@ export function RedPacketSystem() {
 }
 
 // 红包卡片组件
-function PacketCard({ packetId }: { packetId: bigint }) {
+function PacketCard({
+  packetId,
+  claimRecords,
+  onRefresh,
+  isLoading
+}: {
+  packetId: bigint
+  claimRecords: ClaimRecord[]
+  onRefresh: () => void
+  isLoading: boolean
+}) {
+  const [showDetails, setShowDetails] = useState(false)
+
   const { data: packetInfo } = useReadContract({
     address: RED_PACKET_ADDRESS as `0x${string}`,
     abi: RED_PACKET_ABI,
@@ -346,8 +549,9 @@ function PacketCard({ packetId }: { packetId: bigint }) {
 
   if (!packetInfo) return null
 
-  const [creator, totalAmount, remainingAmount, totalCount, remainingCount, createdAt, isRandom] = packetInfo
+  const [, totalAmount, remainingAmount, totalCount, remainingCount, , isRandom] = packetInfo
   const progress = Number(remainingCount) / Number(totalCount)
+  const claimedCount = Number(totalCount) - Number(remainingCount)
 
   return (
     <div style={styles.packetCard}>
@@ -372,6 +576,7 @@ function PacketCard({ packetId }: { packetId: bigint }) {
         <p style={{ margin: '0.25rem 0' }}>
           个数: {remainingCount.toString()}/{totalCount.toString()}
         </p>
+        <p style={{ margin: '0.25rem 0' }}>已领取: {claimedCount}</p>
       </div>
 
       <div
@@ -380,7 +585,8 @@ function PacketCard({ packetId }: { packetId: bigint }) {
           height: '8px',
           backgroundColor: '#e9ecef',
           borderRadius: '4px',
-          overflow: 'hidden'
+          overflow: 'hidden',
+          marginBottom: '0.75rem'
         }}
       >
         <div
@@ -392,6 +598,89 @@ function PacketCard({ packetId }: { packetId: bigint }) {
           }}
         />
       </div>
+
+      {/* 操作按钮组 */}
+      <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <button
+          onClick={() => setShowDetails(!showDetails)}
+          style={{
+            flex: 1,
+            padding: '0.5rem',
+            backgroundColor: '#f8f9fa',
+            border: '1px solid #dee2e6',
+            borderRadius: '4px',
+            fontSize: '0.75rem',
+            cursor: 'pointer',
+            color: '#495057'
+          }}
+        >
+          {showDetails ? '▲ 收起详情' : `▼ 查看领取记录 (${claimRecords.length})`}
+        </button>
+        <button
+          onClick={onRefresh}
+          disabled={isLoading}
+          style={{
+            padding: '0.5rem 0.75rem',
+            backgroundColor: isLoading ? '#e9ecef' : '#007bff',
+            color: isLoading ? '#6c757d' : '#fff',
+            border: '1px solid #dee2e6',
+            borderRadius: '4px',
+            fontSize: '0.75rem',
+            cursor: isLoading ? 'not-allowed' : 'pointer',
+            opacity: isLoading ? 0.6 : 1
+          }}
+          title="刷新领取记录"
+        >
+          🔄
+        </button>
+      </div>
+
+      {/* 领取记录详情 */}
+      {showDetails && (
+        <div
+          style={{
+            marginTop: '0.75rem',
+            padding: '0.75rem',
+            backgroundColor: '#f8f9fa',
+            borderRadius: '4px',
+            border: '1px solid #dee2e6'
+          }}
+        >
+          <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.875rem' }}>领取记录</h4>
+          {claimRecords.length === 0 ? (
+            <p style={{ margin: 0, fontSize: '0.75rem', color: '#666' }}>暂无领取记录</p>
+          ) : (
+            <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+              {claimRecords.map((record, index) => (
+                <div
+                  key={index}
+                  style={{
+                    padding: '0.5rem',
+                    marginBottom: '0.5rem',
+                    backgroundColor: '#fff',
+                    borderRadius: '4px',
+                    fontSize: '0.75rem',
+                    border: '1px solid #e9ecef'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                    <span style={{ fontWeight: 'bold', color: '#495057' }}>第 {index + 1} 个</span>
+                    <span style={{ color: '#28a745', fontWeight: 'bold' }}>
+                      {formatEther(record.amount)} ETH
+                    </span>
+                  </div>
+                  <div style={{ color: '#6c757d' }}>
+                    {record.claimer.slice(0, 10)}...{record.claimer.slice(-8)}
+                  </div>
+                  <div style={{ color: '#adb5bd', fontSize: '0.7rem', marginTop: '0.25rem' }}>
+                    {new Date(Number(record.timestamp) * 1000).toLocaleString('zh-CN')}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -8,7 +8,8 @@ export const config = createConfig({
     injected(), // MetaMask 和其他注入式钱包
   ],
   transports: {
-    [sepolia.id]: http(),
+    // 使用 Alchemy 公共端点，更稳定
+    [sepolia.id]: http('https://eth-sepolia.g.alchemy.com/v2/demo'),
     [mainnet.id]: http(),
   },
 });

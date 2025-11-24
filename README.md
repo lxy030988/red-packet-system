@@ -21,7 +21,7 @@ export const config = createConfig({
 })
 ```
 
-- 2. WagmiProvider + QueryClientProvider
+- 2.WagmiProvider + QueryClientProvider
 
 ```js
 import { StrictMode } from 'react'
